@@ -9,7 +9,26 @@ var slice = Array.prototype.slice;
  * Expose `co`.
  */
 
-module.exports = co['default'] = co.co = co;
+module.exports = makeCo(Promise);
+
+function makeCo(_Promise) {
+/**
+ * Create a new instance of co using another Promise implementation
+ * e.g. bluebird
+ *
+ * After calling `co = co.use(require('bluebird'))`, all promises
+ * returned from co will be bluebird promises rather than native.
+ *
+ * Returns `co` for chaining.
+ *
+ * @param {Function} Promise
+ * @return {Function}
+ * @api public
+ */
+
+co.use = function (_Promise) {
+  return makeCo(_Promise);
+};
 
 /**
  * Wrap the given generator `fn` into a
@@ -46,7 +65,7 @@ function co(gen) {
   // we wrap everything in a promise to avoid promise chaining,
   // which leads to memory leak errors.
   // see https://github.com/tj/co/issues/180
-  return new Promise(function(resolve, reject) {
+  return new _Promise(function(resolve, reject) {
     if (typeof gen === 'function') gen = gen.call(ctx);
     if (!gen || typeof gen.next !== 'function') return resolve(gen);
 
@@ -104,6 +123,12 @@ function co(gen) {
 }
 
 /**
+ * Duplicate co as co.default and co.co
+ */
+
+co['default'] = co.co = co;
+
+/**
  * Convert a `yield`ed value into a promise.
  *
  * @param {Mixed} obj
@@ -131,7 +156,7 @@ function toPromise(obj) {
 
 function thunkToPromise(fn) {
   var ctx = this;
-  return new Promise(function (resolve, reject) {
+  return new _Promise(function (resolve, reject) {
     fn.call(ctx, function (err, res) {
       if (err) return reject(err);
       if (arguments.length > 2) res = slice.call(arguments, 1);
@@ -150,7 +175,7 @@ function thunkToPromise(fn) {
  */
 
 function arrayToPromise(obj) {
-  return Promise.all(obj.map(toPromise, this));
+  return _Promise.all(obj.map(toPromise, this));
 }
 
 /**
@@ -172,7 +197,7 @@ function objectToPromise(obj){
     if (promise && isPromise(promise)) defer(promise, key);
     else results[key] = obj[key];
   }
-  return Promise.all(promises).then(function () {
+  return _Promise.all(promises).then(function () {
     return results;
   });
 
@@ -233,4 +258,7 @@ function isGeneratorFunction(obj) {
 
 function isObject(val) {
   return Object == val.constructor;
+}
+
+  return co;
 }
