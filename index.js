@@ -12,6 +12,34 @@ var slice = Array.prototype.slice;
 module.exports = co['default'] = co.co = co;
 
 /**
+ * Create a new instance of co using another Promise implementation
+ * e.g. bluebird
+ *
+ * After calling `co = co.use(require('bluebird'))`, all promises
+ * returned from co will be bluebird promises rather than native.
+ *
+ * @param {Function} _Promise
+ * @return {Function}
+ * @api public
+ */
+
+co.use = function (_Promise) {
+  var newCo = function co(gen) {
+    return coInternal.call(this, gen, _Promise);
+  };
+
+  newCo.wrap = function (fn) {
+    return wrap.call(this, fn, _Promise);
+  };
+  
+  newCo.use = co.use;
+
+  newCo['default'] = newCo.co = newCo;
+
+  return newCo;
+};
+
+/**
  * Wrap the given generator `fn` into a
  * function that returns a promise.
  * This is a separate function so that
@@ -24,10 +52,14 @@ module.exports = co['default'] = co.co = co;
  */
 
 co.wrap = function (fn) {
+  return wrap.call(this, fn, Promise);
+};
+
+function wrap(fn, _Promise) {
   createPromise.__generatorFunction__ = fn;
   return createPromise;
   function createPromise() {
-    return co.call(this, fn.apply(this, arguments));
+    return coInternal.call(this, fn.apply(this, arguments), _Promise);
   }
 };
 
@@ -41,12 +73,16 @@ co.wrap = function (fn) {
  */
 
 function co(gen) {
+  return coInternal.call(this, gen, Promise);
+}
+
+function coInternal(gen, _Promise) {
   var ctx = this;
 
   // we wrap everything in a promise to avoid promise chaining,
   // which leads to memory leak errors.
   // see https://github.com/tj/co/issues/180
-  return new Promise(function(resolve, reject) {
+  return new _Promise(function(resolve, reject) {
     if (typeof gen === 'function') gen = gen.call(ctx);
     if (!gen || typeof gen.next !== 'function') return resolve(gen);
 
@@ -95,7 +131,7 @@ function co(gen) {
 
     function next(ret) {
       if (ret.done) return resolve(ret.value);
-      var value = toPromise.call(ctx, ret.value);
+      var value = toPromise.call(ctx, ret.value, _Promise);
       if (value && isPromise(value)) return value.then(onFulfilled, onRejected);
       return onRejected(new TypeError('You may only yield a function, promise, generator, array, or object, '
         + 'but the following object was passed: "' + String(ret.value) + '"'));
@@ -111,13 +147,13 @@ function co(gen) {
  * @api private
  */
 
-function toPromise(obj) {
+function toPromise(obj, _Promise) {
   if (!obj) return obj;
   if (isPromise(obj)) return obj;
-  if (isGeneratorFunction(obj) || isGenerator(obj)) return co.call(this, obj);
-  if ('function' == typeof obj) return thunkToPromise.call(this, obj);
-  if (Array.isArray(obj)) return arrayToPromise.call(this, obj);
-  if (isObject(obj)) return objectToPromise.call(this, obj);
+  if (isGeneratorFunction(obj) || isGenerator(obj)) return coInternal.call(this, obj, _Promise);
+  if ('function' == typeof obj) return thunkToPromise.call(this, obj, _Promise);
+  if (Array.isArray(obj)) return arrayToPromise.call(this, obj, _Promise);
+  if (isObject(obj)) return objectToPromise.call(this, obj, _Promise);
   return obj;
 }
 
@@ -129,9 +165,9 @@ function toPromise(obj) {
  * @api private
  */
 
-function thunkToPromise(fn) {
+function thunkToPromise(fn, _Promise) {
   var ctx = this;
-  return new Promise(function (resolve, reject) {
+  return new _Promise(function (resolve, reject) {
     fn.call(ctx, function (err, res) {
       if (err) return reject(err);
       if (arguments.length > 2) res = slice.call(arguments, 1);
@@ -149,8 +185,11 @@ function thunkToPromise(fn) {
  * @api private
  */
 
-function arrayToPromise(obj) {
-  return Promise.all(obj.map(toPromise, this));
+function arrayToPromise(obj, _Promise) {
+  var ctx = this;
+  return _Promise.all(obj.map(function(attribute) {
+    return toPromise.call(ctx, attribute, _Promise);
+  }));
 }
 
 /**
@@ -162,17 +201,17 @@ function arrayToPromise(obj) {
  * @api private
  */
 
-function objectToPromise(obj){
+function objectToPromise(obj, _Promise){
   var results = new obj.constructor();
   var keys = Object.keys(obj);
   var promises = [];
   for (var i = 0; i < keys.length; i++) {
     var key = keys[i];
-    var promise = toPromise.call(this, obj[key]);
+    var promise = toPromise.call(this, obj[key], _Promise);
     if (promise && isPromise(promise)) defer(promise, key);
     else results[key] = obj[key];
   }
-  return Promise.all(promises).then(function () {
+  return _Promise.all(promises).then(function () {
     return results;
   });
 
